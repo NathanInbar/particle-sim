@@ -1,0 +1,35 @@
+# Microsoft Visual Studio Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/csharp.suppressions.json # If you use C# Dev Kit suppressions
+
+# MonoGame and .NET
+## Build Folders (Most important)
+[Bb]in/
+[Oo]bj/
+
+## NuGet Packages
+packages/
+*.nupkg
+# NuGet v3 Global Package Cache
+
+## .NET Core
+project.lock.json
+project.assets.json # Often part of obj/ but sometimes can appear elsewhere
+*.nuget.props
+*.nuget.targets
+
+# User-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]
