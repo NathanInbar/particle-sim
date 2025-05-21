@@ -13,13 +13,15 @@ namespace particle_sim.Simulation.Boids
         public Color Color;
         public float Size;
         public bool IsAlive;
+
+        // Calculates orientation, avoiding Atan2(0,0) if velocity is zero.
         public float Orientation => (Velocity.LengthSquared() > Epsilon * Epsilon) ? (float)Math.Atan2(Velocity.Y, Velocity.X) : 0f; // Avoid Atan2(0,0)
 
         public float MaxSpeed { get; set; }
         public float MinSpeed { get; set; }
-        public float MaxForce { get; set; }
-        public float PerceptionRadius { get; set; }
-        public float SeparationRadius { get; set; }
+        public float MaxForce { get; set; } // Limits how sharply a boid can turn.
+        public float PerceptionRadius { get; set; }  // Range for detecting neighbors for alignment/cohesion.
+        public float SeparationRadius { get; set; } // Range for actively avoiding other boids.
 
         public float SeparationWeight { get; set; }
         public float AlignmentWeight { get; set; }
@@ -28,11 +30,14 @@ namespace particle_sim.Simulation.Boids
         public float BoundaryAvoidanceWeight { get; set; }
         public float BoundaryMargin { get; set; }
 
+        // Prevents division by 0
         private const float Epsilon = 0.0001f;
 
         public Boid()
         {
             IsAlive = false;
+
+            // Default params
             MaxSpeed = 150f;
             MinSpeed = 20f;
             MaxForce = 10f;
@@ -55,7 +60,7 @@ namespace particle_sim.Simulation.Boids
             Size = size;
             IsAlive = true;
 
-            // Ensure initial velocity stays within speed limit
+            // Clamp initial velocity
             if (Velocity.LengthSquared() > MaxSpeed * MaxSpeed)
             {
                 Velocity.Normalize();
@@ -120,23 +125,24 @@ namespace particle_sim.Simulation.Boids
             Position += Velocity * deltaTime;
         }
 
+        // Steer to avoid crowding local neighbors.
         private Vector2 CalculateSeparation(List<Boid> neighbors)
         {
             Vector2 steer = Vector2.Zero;
             int count = 0;
             foreach (Boid other in neighbors)
             {
-                if (!other.IsAlive || other == this) continue;
-                float distanceSq = Vector2.DistanceSquared(Position, other.Position); // Use DistanceSquared for efficiency
+                // Removed !other.IsAlive check here
+                if (other == this) continue;
+                float distanceSq = Vector2.DistanceSquared(Position, other.Position);
                 if (distanceSq > Epsilon * Epsilon && distanceSq < SeparationRadius * SeparationRadius)
                 {
                     Vector2 diff = Position - other.Position;
-                    // Weight by inverse distance (stronger repulsion for closer boids)
                     if (diff.LengthSquared() > Epsilon)
                     {
-                         diff.Normalize();
-                         steer += diff;
-                         count++;
+                        diff.Normalize();
+                        steer += diff;
+                        count++;
                     }
                 }
             }
@@ -148,20 +154,20 @@ namespace particle_sim.Simulation.Boids
             {
                 steer.Normalize();
                 steer *= MaxSpeed;
-                steer -= Velocity;
+                steer -= Velocity; // Steering = desired - velocity
             }
             return steer;
         }
 
+        // Steer towards the average heading of local neighbors.
         private Vector2 CalculateAlignment(List<Boid> neighbors)
         {
             Vector2 sumVelocity = Vector2.Zero;
             int count = 0;
             foreach (Boid other in neighbors)
             {
-                if (!other.IsAlive || other == this) continue;
+                if (other == this) continue;
 
-                // Assuming neighbors are already within PerceptionRadius due to SpatialGrid
                 sumVelocity += other.Velocity;
                 count++;
             }
@@ -179,31 +185,30 @@ namespace particle_sim.Simulation.Boids
             return Vector2.Zero;
         }
 
+        // Steer towards the center of local neighbors
         private Vector2 CalculateCohesion(List<Boid> neighbors)
         {
             Vector2 sumPosition = Vector2.Zero;
             int count = 0;
             foreach (Boid other in neighbors)
             {
-                if (!other.IsAlive || other == this) continue;
+                if (other == this) continue;
 
-                // Assuming neighbors are already within PerceptionRadius
                 sumPosition += other.Position;
                 count++;
             }
             if (count > 0)
             {
                 sumPosition /= count;
-                return Seek(sumPosition);
+                return Seek(sumPosition); // Seek the calculated center point
             }
             return Vector2.Zero;
         }
 
         private Vector2 CalculateGoalSeeking(Vector2 targetPosition)
-        {
-            return Seek(targetPosition);
-        }
+            => Seek(targetPosition);
 
+        // Calculates a steering force to move towards a target position.
         private Vector2 Seek(Vector2 target)
         {
             Vector2 desiredVelocity = target - Position;
@@ -217,15 +222,12 @@ namespace particle_sim.Simulation.Boids
             return Vector2.Zero;
         }
 
-        /// <summary>
-        /// Calculates steering force to stay within the given dynamic bounds.
-        /// </summary>
+        // Calculates steering force to stay within the given dynamic bounds.
         private Vector2 CalculateBoundaryAvoidance(Rectangle dynamicVisibleBounds)
         {
             Vector2 desiredVelocity = Vector2.Zero;
             bool applyForce = false;
 
-            // Using the boid's current world position directly with the dynamic world bounds
             if (Position.X < dynamicVisibleBounds.Left + BoundaryMargin)
             {
                 desiredVelocity.X = MaxSpeed;
@@ -263,7 +265,7 @@ namespace particle_sim.Simulation.Boids
             if (!IsAlive || texture == null) return;
             Vector2 origin = new Vector2(texture.Width / 2f, texture.Height / 2f);
             float scale = Size / Math.Max(texture.Width, texture.Height);
-            if (scale < 0.1f) scale = 0.1f; // Prevent texture from becoming too small/invisible
+            if (scale < 0.1f) scale = 0.1f; // Prevent texture from becoming too small
 
             spriteBatch.Draw(
                 texture, Position, null, Color,
