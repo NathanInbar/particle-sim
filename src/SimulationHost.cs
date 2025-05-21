@@ -1,170 +1,169 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿// src/SimulationHost.cs
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
-using particle_sim.Core.Graphics;
-using particle_sim.Simulation.Particles;
+using System;
+using System.Collections.Generic;
+using System.Linq; // Keep for potential future use, though not strictly needed in this version
 
+// New using statements for our simulation classes
+using particle_sim.Simulation.Core;
+using particle_sim.Simulation.Environment;
+using particle_sim.Simulation.Agents;
+using particle_sim.Core.Graphics; // Assuming Camera2D is here
 
-namespace particle_sim;
-
-public class SimulationHost : Game
+namespace particle_sim
 {
-    private GraphicsDeviceManager _graphics;
-    private SpriteBatch _spriteBatch;
-    private Camera2D _camera;
-
-    // particles
-    private List<Particle> _particles;
-    private Texture2D _pixelTexture;
-    private Random _random;
-
-    private const int MaxParticles = 500;
-    private float _particleSpawnTimer = 0f;
-    private const float ParticleSpawnInterval = 0.01f;
-    // - - -
-
-    public SimulationHost()
+    public class SimulationHost : Game
     {
-        _graphics = new GraphicsDeviceManager(this);
-        Content.RootDirectory = "Content";
-        IsMouseVisible = true;
-    }
+        private GraphicsDeviceManager _graphics;
+        private SpriteBatch _spriteBatch;
+        private Camera2D _camera;
 
-    protected override void Initialize()
-    {
-        base.Initialize();
-    }
+        // Simulation Components
+        private SimWorld _environment;
+        private List<Nest> _nests;
+        private List<Agent> _agents;
+        private Dictionary<int, Color> _nestColorsById; // For passing colors to environment rendering
 
-    protected override void LoadContent()
-    {
-        _spriteBatch = new SpriteBatch(GraphicsDevice);
+        // Helper Textures
+        private Texture2D _pixelTexture; // For drawing simple shapes
 
-        // initialize camera
-        _camera = new Camera2D(GraphicsDevice.Viewport);
-        _camera.Position = new Vector2(100, 100);
-        _camera.Zoom = 1.5f;
+        // Simulation Parameters
+        private const int EnvironmentWidth = 1200;
+        private const int EnvironmentHeight = 800;
+        private const int NumNests = 2; // Example: 2 nests
+        private const int AgentsPerNest = 50;
 
-        _random = new Random();
+        private Random _random; // General purpose random
 
-        // Create a 1x1 white pixel texture
-        _pixelTexture = new Texture2D(GraphicsDevice, 1, 1);
-        _pixelTexture.SetData(new[] { Color.White });
+        // New color for the SimWorld background
+        private Color _simWorldBackgroundColor = new Color(220, 220, 220); 
+        // New color for the area outside the SimWorld (camera background)
+        private Color _cameraBackgroundColor = Color.Black;
 
-        _particles = new List<Particle>(MaxParticles);
-
-        // Spawn some initial particles for testing
-        for (int i = 0; i < 50; i++)
+        public SimulationHost()
         {
-            SpawnParticle(Vector2.Zero); // Spawn near the world origin
-        }
-    }
+            _graphics = new GraphicsDeviceManager(this);
+            Content.RootDirectory = "Content";
+            IsMouseVisible = true;
 
-    protected override void Update(GameTime gameTime)
-    {
-        if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
-            Exit();
-
-        // particles
-        float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
-
-        // Update particle spawn timer
-        _particleSpawnTimer += deltaTime;
-        if (_particleSpawnTimer >= ParticleSpawnInterval)
-        {
-            Vector2 spawnPos = _camera.ScreenToWorld(new Vector2(GraphicsDevice.Viewport.Width / 2f, GraphicsDevice.Viewport.Height / 2f)); // Center of screen
-            SpawnParticle(spawnPos);
-            _particleSpawnTimer = 0f;
+            // Adjust window size if desired
+            _graphics.PreferredBackBufferWidth = 1280;
+            _graphics.PreferredBackBufferHeight = 720;
         }
 
-
-        // Update all active particles
-        foreach (var particle in _particles)
+        protected override void Initialize()
         {
-            if (particle.IsAlive)
+            _random = new Random();
+            _nestColorsById = new Dictionary<int, Color>();
+            base.Initialize();
+        }
+
+        protected override void LoadContent()
+        {
+            _spriteBatch = new SpriteBatch(GraphicsDevice);
+
+            // Initialize Camera
+            _camera = new Camera2D(GraphicsDevice.Viewport);
+            _camera.Position = new Vector2(EnvironmentWidth / 2f, EnvironmentHeight / 2f);
+            _camera.Zoom = 0.75f; // Adjusted zoom for potentially larger area
+
+            // Create 1x1 white pixel texture for drawing
+            _pixelTexture = new Texture2D(GraphicsDevice, 1, 1);
+            _pixelTexture.SetData(new[] { Color.White });
+
+            // Initialize Environment
+            _environment = new SimWorld(GraphicsDevice, EnvironmentWidth, EnvironmentHeight);
+
+            // Initialize Nests and Agents
+            _nests = new List<Nest>();
+            _agents = new List<Agent>();
+
+            // Define some base colors for nests
+            Color[] baseNestColors = new Color[] { Color.Red, Color.Blue, Color.Green, Color.Yellow, Color.Purple };
+
+            for (int i = 0; i < NumNests; i++)
             {
-                particle.Update(deltaTime);
-            }
-        }
-
-        // - - -
-
-        // Camera Controls
-        if (Keyboard.GetState().IsKeyDown(Keys.Left)) _camera.Position += new Vector2(-100f * deltaTime, 0);
-        if (Keyboard.GetState().IsKeyDown(Keys.Right)) _camera.Position += new Vector2(100f * deltaTime, 0);
-        if (Keyboard.GetState().IsKeyDown(Keys.Up)) _camera.Position += new Vector2(0, -100f * deltaTime);
-        if (Keyboard.GetState().IsKeyDown(Keys.Down)) _camera.Position += new Vector2(0, 100f * deltaTime);
-        if (Keyboard.GetState().IsKeyDown(Keys.OemPlus)) _camera.Zoom += 0.5f * deltaTime;
-        if (Keyboard.GetState().IsKeyDown(Keys.OemMinus)) _camera.Zoom -= 0.5f * deltaTime;
-
-
-        base.Update(gameTime);
-    }
-
-    protected override void Draw(GameTime gameTime)
-    {
-        GraphicsDevice.Clear(Color.Black);
-
-        _spriteBatch.Begin(transformMatrix: _camera.GetViewMatrix());
-        
-        // Draw particles
-        foreach (var particle in _particles)
-        {
-            if (particle.IsAlive)
-            {
-                Rectangle destinationRectangle = new Rectangle(
-                    (int)particle.Position.X,
-                    (int)particle.Position.Y,
-                    (int)particle.Size,
-                    (int)particle.Size
+                Vector2 nestPosition = new Vector2(
+                    _random.Next(100, EnvironmentWidth - 100),
+                    _random.Next(100, EnvironmentHeight - 100)
                 );
-                _spriteBatch.Draw(_pixelTexture, destinationRectangle, particle.Color);
+                Color agentAndBaseNestColor = baseNestColors[i % baseNestColors.Length]; // This color will be for agents
+                float nestSize = 30f;
+                
+                // Nests will store their primary color (used by agents)
+                Nest newNest = new Nest(i, nestPosition, agentAndBaseNestColor, nestSize, NestShape.Circle);
+                _nests.Add(newNest);
+                _nestColorsById[i] = agentAndBaseNestColor; 
+
+                for (int j = 0; j < AgentsPerNest; j++)
+                {
+                    Agent agent = newNest.SpawnAgent(); // Agent gets the primary (brighter) nest color
+                    _agents.Add(agent);
+                }
             }
         }
 
-        _spriteBatch.End();
-
-        base.Draw(gameTime);
-    }
-
-
-
-    // HELPERS
-    private void SpawnParticle(Vector2 spawnPosition)
-    {
-        // Simple object pooling
-        Particle particle = _particles.FirstOrDefault(p => !p.IsAlive);
-
-        if (particle == null)
+        protected override void Update(GameTime gameTime)
         {
-            if (_particles.Count < MaxParticles)
+            if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
+                Exit();
+
+            // Update Environment Logic (Pheromone Decay, etc.)
+            _environment.UpdateLogic(gameTime);
+
+            // Update Agents
+            foreach (Agent agent in _agents)
             {
-                particle = new Particle();
-                _particles.Add(particle);
+                // The agent's Update method now uses its internal HomeNest reference
+                agent.Update(gameTime, _environment); // Pass HomeNest for context like IsPositionInside
             }
-            else
-            {
-                return; // Max particles reached, cannot spawn more
-            }
+
+            // Camera Controls (example)
+            float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
+            float cameraSpeed = 300f;
+            if (Keyboard.GetState().IsKeyDown(Keys.Left)) _camera.Position += new Vector2(-cameraSpeed * deltaTime, 0);
+            if (Keyboard.GetState().IsKeyDown(Keys.Right)) _camera.Position += new Vector2(cameraSpeed * deltaTime, 0);
+            if (Keyboard.GetState().IsKeyDown(Keys.Up)) _camera.Position += new Vector2(0, -cameraSpeed * deltaTime);
+            if (Keyboard.GetState().IsKeyDown(Keys.Down)) _camera.Position += new Vector2(0, cameraSpeed * deltaTime);
+            if (Keyboard.GetState().IsKeyDown(Keys.OemPlus) || Keyboard.GetState().IsKeyDown(Keys.Add)) _camera.Zoom += 0.5f * deltaTime;
+            if (Keyboard.GetState().IsKeyDown(Keys.OemMinus) || Keyboard.GetState().IsKeyDown(Keys.Subtract)) _camera.Zoom -= 0.5f * deltaTime;
+            _camera.Zoom = MathHelper.Clamp(_camera.Zoom, 0.1f, 5f); // Prevent extreme zoom
+
+            base.Update(gameTime);
         }
 
-        // particle properties
-        float angle = (float)(_random.NextDouble() * MathHelper.TwoPi); // Random direction
-        float speed = (float)(_random.NextDouble() * 100f + 50f);      // Random speed (pixels/sec)
-        Vector2 velocity = new Vector2((float)Math.Cos(angle), (float)Math.Sin(angle)) * speed;
+        protected override void Draw(GameTime gameTime)
+        {
+            GraphicsDevice.Clear(_cameraBackgroundColor); // A different background color
 
-        // Random color
-        Color color = new Color(
-            (float)_random.NextDouble() * 0.5f + 0.5f, // R
-            (float)_random.NextDouble() * 0.5f + 0.5f, // G
-            (float)_random.NextDouble() * 0.5f + 0.5f  // B
-        );
+            // Update the pheromone render layer (texture)
+            // This should happen before drawing it to the screen.
+            _environment.UpdatePheromoneRenderLayer(GraphicsDevice, _spriteBatch, _nestColorsById, _pixelTexture);
 
-        float size = (float)(_random.NextDouble() * 4f + 2f);          // Random size (2 to 6 pixels)
-        float lifetime = (float)(_random.NextDouble() * 2f + 1f);       // Random lifetime (1 to 3 seconds)
+            // Begin SpriteBatch with camera transform
+            _spriteBatch.Begin(transformMatrix: _camera.GetViewMatrix());
 
-        particle.Spawn(spawnPosition, velocity, color, size, lifetime);
+            _spriteBatch.Draw(_pixelTexture, new Rectangle(0, 0, EnvironmentWidth, EnvironmentHeight), _simWorldBackgroundColor);
+            // 1. Draw Environment (Pheromone Layer)
+            _environment.Draw(_spriteBatch);
+
+            // 2. Draw Nests
+            foreach (Nest nest in _nests)
+            {
+                nest.Draw(_spriteBatch, _pixelTexture);
+            }
+
+            // 3. Draw Agents
+            foreach (Agent agent in _agents)
+            {
+                agent.Draw(_spriteBatch, _pixelTexture);
+            }
+
+            _spriteBatch.End();
+
+            base.Draw(gameTime);
+        }
     }
 }
