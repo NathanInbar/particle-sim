@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using particle_sim.Simulation.Core;
-using particle_sim.Simulation.Environment; // Assuming Nest and SimWorld are in here or sub-namespaces
+using particle_sim.Simulation.Environment;
 using static System.Math;
 
 namespace particle_sim.Simulation.Agents
@@ -26,24 +26,28 @@ namespace particle_sim.Simulation.Agents
         private float _restTimer;
         private const float RestDuration = 2f;
 
+        // New fields for wandering when trail is lost
+        private Vector2 _lastKnownGoodDirection;
+        private float _lostTrailWanderTimer;
+        private const float MaxLostTrailWanderTime = 1.5f; // Wander for 1.5 seconds
+
         private static System.Random _random = new System.Random();
 
-        // Constructor accepts the Nest object
         public Agent(Nest homeNest, Vector2 initialVelocity)
         {
-            HomeNest = homeNest; // <<< INITIALIZE HomeNest HERE
+            HomeNest = homeNest;
             NestId = homeNest.NestId;
-            Position = homeNest.Position; // Spawn at nest position
+            Position = homeNest.Position;
             AgentColor = homeNest.NestBaseColor;
 
             Velocity = initialVelocity;
             CurrentHeadingAngle = (float)System.Math.Atan2(Velocity.Y, Velocity.X);
             CurrentState = AgentState.Exploring;
-            MovementSpeed = initialVelocity.Length(); // Or use a default if initialVelocity is just direction
+            MovementSpeed = initialVelocity.Length(); 
+            _lastKnownGoodDirection = Vector2.Normalize(initialVelocity); // Initialize with starting direction
         }
 
-        // Agent.Update now uses its internal this.HomeNest
-        public void Update(GameTime gameTime, SimWorld simWorld) // Notice homeNest is NOT a parameter here
+        public void Update(GameTime gameTime, SimWorld simWorld)
         {
             float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
@@ -53,7 +57,8 @@ namespace particle_sim.Simulation.Agents
                     UpdateExploring(deltaTime, simWorld);
                     break;
                 case AgentState.ReturningToNest:
-                    UpdateReturning(deltaTime); // Uses this.HomeNest
+                    // UpdateReturning now needs simWorld to query pheromones
+                    UpdateReturning(deltaTime, simWorld); 
                     break;
                 case AgentState.RestingAtNest:
                     UpdateResting(deltaTime);
@@ -63,49 +68,33 @@ namespace particle_sim.Simulation.Agents
             Position += Velocity * deltaTime;
 
             bool bounced = false;
-            // Check horizontal boundaries
             if (Position.X - AgentSize / 2 < 0)
             {
-                Position.X = AgentSize / 2; // Clamp position
-                Velocity.X *= -1;           // Invert X velocity
+                Position.X = AgentSize / 2; 
+                Velocity.X *= -1;           
                 bounced = true;
             }
             else if (Position.X + AgentSize / 2 > simWorld.Width)
             {
-                Position.X = simWorld.Width - AgentSize / 2; // Clamp position
-                Velocity.X *= -1;                            // Invert X velocity
+                Position.X = simWorld.Width - AgentSize / 2; 
+                Velocity.X *= -1;                            
                 bounced = true;
             }
 
-            // Check vertical boundaries
             if (Position.Y - AgentSize / 2 < 0)
             {
-                Position.Y = AgentSize / 2; // Clamp position
-                Velocity.Y *= -1;           // Invert Y velocity
+                Position.Y = AgentSize / 2; 
+                Velocity.Y *= -1;           
                 bounced = true;
             }
             else if (Position.Y + AgentSize / 2 > simWorld.Height)
             {
-                Position.Y = simWorld.Height - AgentSize / 2; // Clamp position
-                Velocity.Y *= -1;                             // Invert Y velocity
+                Position.Y = simWorld.Height - AgentSize / 2; 
+                Velocity.Y *= -1;                             
                 bounced = true;
             }
-
-            // If bounced, update heading angle to match new velocity
-            if (bounced && Velocity.LengthSquared() > 0.001f)
-            {
-                CurrentHeadingAngle = (float)System.Math.Atan2(Velocity.Y, Velocity.X);
-            }
-            // --- END OF BOUNDARY CHECKS ---
             
-            // Keep heading angle synchronized with velocity if not bounced (or if velocity became zero)
-            // This was the old logic, now only needed if no bounce occurred or to recalc if velocity is non-zero
-            if (!bounced && Velocity.LengthSquared() > 0.001f)
-            {
-                CurrentHeadingAngle = (float)System.Math.Atan2(Velocity.Y, Velocity.X);
-            }
-
-            if (Velocity.LengthSquared() > 0.001f)
+            if (Velocity.LengthSquared() > 0.001f) // Update heading if moving
             {
                 CurrentHeadingAngle = (float)System.Math.Atan2(Velocity.Y, Velocity.X);
             }
@@ -116,37 +105,87 @@ namespace particle_sim.Simulation.Agents
             float wanderStrength = 1.5f;
             CurrentHeadingAngle += (_random.NextSingle() * 2f - 1f) * wanderStrength * deltaTime;
             Velocity = new Vector2((float)Cos(CurrentHeadingAngle), (float)Sin(CurrentHeadingAngle)) * MovementSpeed;
+            _lastKnownGoodDirection = Vector2.Normalize(Velocity); // Keep track of exploring direction
 
-            simWorld.AddPheromone(Position, NestId, 1.0f);
+            simWorld.AddPheromone(Position, NestId, 1.0f); //
 
-            // Example: Query foreign pheromones
-            List<PheromoneSignal> foreignSignals = simWorld.QueryPheromonesInRadius(Position, DetectionRadius, NestId, true);
+            List<PheromoneSignal> foreignSignals = simWorld.QueryPheromonesInRadius(Position, DetectionRadius, NestId, true); //
             if (foreignSignals.Count > 0)
             {
                 CurrentState = AgentState.ReturningToNest;
-                // Basic logic to head towards nest, could be more sophisticated (e.g. away from avg foreign signal)
+                _lostTrailWanderTimer = 0; // Reset wander timer when switching to return
+                // Initial direction towards nest, will be refined by pheromone logic in UpdateReturning
                 Vector2 directionToNest = this.HomeNest.Position - Position;
                 if (directionToNest.LengthSquared() > 0)
                 {
-                    Velocity = Vector2.Normalize(directionToNest) * MovementSpeed;
+                     _lastKnownGoodDirection = Vector2.Normalize(directionToNest); // Initial aim towards nest
+                    Velocity = _lastKnownGoodDirection * MovementSpeed;
                 }
             }
         }
 
-        private void UpdateReturning(float deltaTime) // Uses this.HomeNest
+        // Updated UpdateReturning method
+        private void UpdateReturning(float deltaTime, SimWorld simWorld)
         {
-            Vector2 directionToNest = this.HomeNest.Position - Position;
-            if (directionToNest.LengthSquared() > 0.001f)
+            List<PheromoneSignal> homeSignals = simWorld.QueryPheromonesInRadius(Position, DetectionRadius, this.NestId, false); //
+
+            if (homeSignals.Count > 0)
             {
-                directionToNest.Normalize();
-                Velocity = directionToNest * MovementSpeed;
+                Vector2 averagePheromonePosition = Vector2.Zero;
+                float totalStrength = 0f;
+
+                foreach (PheromoneSignal signal in homeSignals)
+                {
+                    averagePheromonePosition += signal.Position * signal.Strength;
+                    totalStrength += signal.Strength;
+                }
+
+                if (totalStrength > 0)
+                {
+                    averagePheromonePosition /= totalStrength;
+                } else if (homeSignals.Count > 0) {
+                    foreach (PheromoneSignal signal in homeSignals) {
+                        averagePheromonePosition += signal.Position;
+                    }
+                    averagePheromonePosition /= homeSignals.Count;
+                }
+
+                Vector2 directionToAveragePheromone = averagePheromonePosition - Position;
+                if (directionToAveragePheromone.LengthSquared() > 0.001f)
+                {
+                    directionToAveragePheromone.Normalize();
+                    Velocity = directionToAveragePheromone * MovementSpeed;
+                    _lastKnownGoodDirection = directionToAveragePheromone; // Remember this good direction
+                    _lostTrailWanderTimer = 0; // Reset timer, we are on a trail
+                }
+                // If very close to pheromone, might not need to change velocity drastically or rely on nest direction
             }
             else
             {
-                Velocity = Vector2.Zero; // Arrived or very close
+                // No home pheromones detected
+                if (_lostTrailWanderTimer < MaxLostTrailWanderTime && _lastKnownGoodDirection.LengthSquared() > 0.001f)
+                {
+                    // Wander in the last known good direction
+                    Velocity = _lastKnownGoodDirection * MovementSpeed;
+                    _lostTrailWanderTimer += deltaTime;
+                }
+                else
+                {
+                    // Wander time expired or no last good direction, revert to direct to nest
+                    Vector2 directionToNest = this.HomeNest.Position - Position;
+                    if (directionToNest.LengthSquared() > 0.001f)
+                    {
+                        directionToNest.Normalize();
+                        Velocity = directionToNest * MovementSpeed;
+                    }
+                    else
+                    {
+                        Velocity = Vector2.Zero; 
+                    }
+                }
             }
 
-            if (this.HomeNest.IsPositionInside(Position))
+            if (this.HomeNest.IsPositionInside(Position)) //
             {
                 CurrentState = AgentState.RestingAtNest;
                 _restTimer = RestDuration;
@@ -154,15 +193,16 @@ namespace particle_sim.Simulation.Agents
             }
         }
 
-        private void UpdateResting(float deltaTime) // Uses this.HomeNest
+        private void UpdateResting(float deltaTime)
         {
             _restTimer -= deltaTime;
             if (_restTimer <= 0)
             {
                 CurrentState = AgentState.Exploring;
-                CurrentHeadingAngle = _random.NextSingle() * MathHelper.TwoPi;
-                Velocity = new Vector2((float)Cos(CurrentHeadingAngle), (float)Sin(CurrentHeadingAngle)) * MovementSpeed;
-                Position = this.HomeNest.Position; // Ensure starting from nest center
+                CurrentHeadingAngle = _random.NextSingle() * MathHelper.TwoPi; //
+                Position = this.HomeNest.Position; // Spawn at nest center
+                Velocity = new Vector2((float)Cos(CurrentHeadingAngle), (float)Sin(CurrentHeadingAngle)) * MovementSpeed; //
+                _lastKnownGoodDirection = Vector2.Normalize(Velocity); // Update for the new exploring direction
             }
         }
 
@@ -174,7 +214,7 @@ namespace particle_sim.Simulation.Agents
                 (int)AgentSize,
                 (int)AgentSize
             );
-            spriteBatch.Draw(pixelTexture, destRect, AgentColor);
+            spriteBatch.Draw(pixelTexture, destRect, AgentColor); //
         }
     }
 }
