@@ -1,8 +1,7 @@
-// src/Simulation/Environment/Environment.cs
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using System.Collections.Generic;
-using particle_sim.Simulation.Core; // For PheromoneSignal
+using particle_sim.Simulation.Core;
 
 namespace particle_sim.Simulation.Environment
 {
@@ -11,29 +10,30 @@ namespace particle_sim.Simulation.Environment
         public int Width { get; private set; }
         public int Height { get; private set; }
 
-        // Spatial Partitioning for Pheromone Detection
+        // Spatial Partitioning
         private List<PheromoneSignal>[,] _spatialPheromoneGrid;
-        private int _gridCellSize = 20; // Size of each cell in the spatial grid
+        private int _gridCellSize = 20;
         private int _gridWidth;
         private int _gridHeight;
 
         // Pheromone Rendering
         private RenderTarget2D _pheromoneRenderLayer;
-        private bool _pheromoneLayerDirty = true; // Flag to redraw render target if needed
+        private bool _pheromoneLayerDirty = true;
 
         // Pheromone properties
         private const float MaxPheromoneStrength = 10.0f;
-        private const float PheromoneDecayRate = 0.5f; // Strength per second
+        private const float PheromoneDecayRate = 0.1f; // Strength per second
 
         public SimWorld(GraphicsDevice graphicsDevice, int width, int height)
         {
             Width = width;
             Height = height;
 
-            // Initialize Spatial Grid
+            // Init spatial grid
             _gridWidth = (Width + _gridCellSize - 1) / _gridCellSize;
             _gridHeight = (Height + _gridCellSize - 1) / _gridCellSize;
             _spatialPheromoneGrid = new List<PheromoneSignal>[_gridWidth, _gridHeight];
+
             for (int x = 0; x < _gridWidth; x++)
             {
                 for (int y = 0; y < _gridHeight; y++)
@@ -42,7 +42,7 @@ namespace particle_sim.Simulation.Environment
                 }
             }
 
-            // Initialize Render Target for pheromones
+            // Init pheromone render target
             _pheromoneRenderLayer = new RenderTarget2D(
                 graphicsDevice,
                 width,
@@ -51,7 +51,7 @@ namespace particle_sim.Simulation.Environment
                 SurfaceFormat.Color, // format
                 DepthFormat.None,
                 0, // preferredMultiSampleCount
-                RenderTargetUsage.PreserveContents // Important for incremental drawing/decay
+                RenderTargetUsage.PreserveContents
             );
         }
 
@@ -62,9 +62,7 @@ namespace particle_sim.Simulation.Environment
 
             if (gridX >= 0 && gridX < _gridWidth && gridY >= 0 && gridY < _gridHeight)
             {
-                // For simplicity in this initial step, let's assume one signal per nest per cell, updating strength.
-                // A more robust system might allow multiple distinct signals or average them.
-                // Here, we'll just add a new signal each time for now. More complex merging/updating later.
+                // assuming one signal per nest per cell, updating strength
                 PheromoneSignal signal = new PheromoneSignal(position, nestId, strength);
                 _spatialPheromoneGrid[gridX, gridY].Add(signal);
                 _pheromoneLayerDirty = true; // Mark for redraw
@@ -74,6 +72,7 @@ namespace particle_sim.Simulation.Environment
         public List<PheromoneSignal> QueryPheromonesInRadius(Vector2 center, float radius, int agentNestId, bool queryForeign)
         {
             List<PheromoneSignal> foundSignals = new List<PheromoneSignal>();
+
             // Determine the grid cells that overlap with the query radius
             int minGridX = (int)((center.X - radius) / _gridCellSize);
             int maxGridX = (int)((center.X + radius) / _gridCellSize);
@@ -108,7 +107,7 @@ namespace particle_sim.Simulation.Environment
             float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
             bool changed = false;
 
-            // Decay pheromones in the spatial grid
+            // Pheromone decay
             for (int x = 0; x < _gridWidth; x++)
             {
                 for (int y = 0; y < _gridHeight; y++)
@@ -118,7 +117,7 @@ namespace particle_sim.Simulation.Environment
                     {
                         PheromoneSignal signal = cellSignals[i];
                         signal.Age += deltaTime;
-                        signal.Strength -= PheromoneDecayRate * deltaTime; // Simple linear decay based on time
+                        signal.Strength -= PheromoneDecayRate * deltaTime; // linear decay based on time
 
                         if (signal.Strength <= 0)
                         {
@@ -127,23 +126,21 @@ namespace particle_sim.Simulation.Environment
                         }
                         else
                         {
-                            cellSignals[i] = signal; // Update struct in list
+                            cellSignals[i] = signal;
                         }
                     }
                 }
             }
             if (changed) _pheromoneLayerDirty = true;
-
-            // TODO: Implement diffusion if desired
         }
         
-        // This method will draw the current state of _spatialPheromoneGrid to _pheromoneRenderLayer
+        // Draw pheromone state to render layer
         public void UpdatePheromoneRenderLayer(GraphicsDevice graphicsDevice, SpriteBatch spriteBatch, Dictionary<int, Color> nestColors, Texture2D pixelTexture)
         {
             if (!_pheromoneLayerDirty) return;
 
             graphicsDevice.SetRenderTarget(_pheromoneRenderLayer);
-            graphicsDevice.Clear(Color.Transparent); // Clear with transparent
+            graphicsDevice.Clear(Color.Transparent);
 
             spriteBatch.Begin();
             for (int x = 0; x < _gridWidth; x++)
@@ -152,14 +149,12 @@ namespace particle_sim.Simulation.Environment
                 {
                     foreach (PheromoneSignal signal in _spatialPheromoneGrid[x,y])
                     {
-                        if (signal.Strength > 0.01f) // Only draw if reasonably strong
+                        if (signal.Strength > 0.01f) // Dont draw super weak pheromones
                         {
-                            Color pheromoneColor = nestColors.GetValueOrDefault(signal.NestId, Color.Gray); // Get color from NestId
+                            Color pheromoneColor = nestColors.GetValueOrDefault(signal.NestId, Color.Gray);
                             float alpha = System.Math.Clamp(signal.Strength / MaxPheromoneStrength, 0.1f, 1.0f);
                             
-                            // Draw each pheromone signal as a small dot/square
-                            // For simplicity, drawing a 1x1 pixel at the exact position.
-                            // A small brush texture could be used for softer pheromones.
+                            // Draw each pheromone signal as a small square
                             spriteBatch.Draw(pixelTexture, signal.Position, null, pheromoneColor * alpha, 0f, Vector2.Zero, 1f, SpriteEffects.None, 0f);
                         }
                     }
@@ -167,14 +162,14 @@ namespace particle_sim.Simulation.Environment
             }
             spriteBatch.End();
 
-            graphicsDevice.SetRenderTarget(null); // Reset render target
+            graphicsDevice.SetRenderTarget(null); // Reset render target after
             _pheromoneLayerDirty = false;
         }
 
 
         public void Draw(SpriteBatch spriteBatch)
         {
-            // Draw the entire pre-rendered pheromone layer
+            // Draw the pheromone layer
             spriteBatch.Draw(_pheromoneRenderLayer, Vector2.Zero, Color.White);
         }
     }

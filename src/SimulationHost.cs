@@ -1,16 +1,11 @@
-﻿// src/SimulationHost.cs
+﻿using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
-using System;
-using System.Collections.Generic;
-using System.Linq; // Keep for potential future use, though not strictly needed in this version
-
-// New using statements for our simulation classes
-using particle_sim.Simulation.Core;
 using particle_sim.Simulation.Environment;
 using particle_sim.Simulation.Agents;
-using particle_sim.Core.Graphics; // Assuming Camera2D is here
+using particle_sim.Core.Graphics;
 
 namespace particle_sim
 {
@@ -26,21 +21,18 @@ namespace particle_sim
         private List<Agent> _agents;
         private Dictionary<int, Color> _nestColorsById; // For passing colors to environment rendering
 
-        // Helper Textures
-        private Texture2D _pixelTexture; // For drawing simple shapes
+        private Texture2D _pixelTexture; // For drawing simple square
 
         // Simulation Parameters
         private const int EnvironmentWidth = 1200;
         private const int EnvironmentHeight = 800;
-        private const int NumNests = 2; // Example: 2 nests
-        private const int AgentsPerNest = 50;
+        private const int NumNests = 4;
+        private const int AgentsPerNest = 100;
+        // - - -
+        private readonly Color _simWorldBackgroundColor = new Color(33, 33, 33);
+        private readonly Color _cameraBackgroundColor = Color.Black;
 
-        private Random _random; // General purpose random
-
-        // New color for the SimWorld background
-        private Color _simWorldBackgroundColor = new Color(220, 220, 220); 
-        // New color for the area outside the SimWorld (camera background)
-        private Color _cameraBackgroundColor = Color.Black;
+        private Random _random;
 
         public SimulationHost()
         {
@@ -48,7 +40,6 @@ namespace particle_sim
             Content.RootDirectory = "Content";
             IsMouseVisible = true;
 
-            // Adjust window size if desired
             _graphics.PreferredBackBufferWidth = 1280;
             _graphics.PreferredBackBufferHeight = 720;
         }
@@ -64,24 +55,24 @@ namespace particle_sim
         {
             _spriteBatch = new SpriteBatch(GraphicsDevice);
 
-            // Initialize Camera
+            // Init camera
             _camera = new Camera2D(GraphicsDevice.Viewport);
             _camera.Position = new Vector2(EnvironmentWidth / 2f, EnvironmentHeight / 2f);
             _camera.Zoom = 0.75f; // Adjusted zoom for potentially larger area
 
-            // Create 1x1 white pixel texture for drawing
+            // 1x1 white pixel texture for drawing little squares
             _pixelTexture = new Texture2D(GraphicsDevice, 1, 1);
             _pixelTexture.SetData(new[] { Color.White });
 
-            // Initialize Environment
+            // Init the simulation world 
             _environment = new SimWorld(GraphicsDevice, EnvironmentWidth, EnvironmentHeight);
 
-            // Initialize Nests and Agents
+            // Init Nests / Agents
             _nests = new List<Nest>();
             _agents = new List<Agent>();
 
-            // Define some base colors for nests
-            Color[] baseNestColors = new Color[] { Color.Red, Color.Blue, Color.Green, Color.Yellow, Color.Purple };
+            // base colors for nests
+            Color[] baseNestColors = { Color.Red, Color.Blue, Color.Green, Color.Yellow, Color.Purple };
 
             for (int i = 0; i < NumNests; i++)
             {
@@ -89,17 +80,17 @@ namespace particle_sim
                     _random.Next(100, EnvironmentWidth - 100),
                     _random.Next(100, EnvironmentHeight - 100)
                 );
-                Color agentAndBaseNestColor = baseNestColors[i % baseNestColors.Length]; // This color will be for agents
+                Color agentAndBaseNestColor = baseNestColors[i % baseNestColors.Length]; // color for agents
                 float nestSize = 30f;
                 
-                // Nests will store their primary color (used by agents)
-                Nest newNest = new Nest(i, nestPosition, agentAndBaseNestColor, nestSize, NestShape.Circle);
+                // Create nests and agents
+                Nest newNest = new Nest(i, nestPosition, agentAndBaseNestColor, nestSize);
                 _nests.Add(newNest);
                 _nestColorsById[i] = agentAndBaseNestColor; 
 
                 for (int j = 0; j < AgentsPerNest; j++)
                 {
-                    Agent agent = newNest.SpawnAgent(); // Agent gets the primary (brighter) nest color
+                    Agent agent = newNest.SpawnAgent();
                     _agents.Add(agent);
                 }
             }
@@ -110,17 +101,14 @@ namespace particle_sim
             if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
                 Exit();
 
-            // Update Environment Logic (Pheromone Decay, etc.)
+            // Update environment
             _environment.UpdateLogic(gameTime);
 
-            // Update Agents
+            // Update agents
             foreach (Agent agent in _agents)
-            {
-                // The agent's Update method now uses its internal HomeNest reference
-                agent.Update(gameTime, _environment); // Pass HomeNest for context like IsPositionInside
-            }
+                agent.Update(gameTime, _environment);
 
-            // Camera Controls (example)
+            // Camera controls
             float deltaTime = (float)gameTime.ElapsedGameTime.TotalSeconds;
             float cameraSpeed = 300f;
             if (Keyboard.GetState().IsKeyDown(Keys.Left)) _camera.Position += new Vector2(-cameraSpeed * deltaTime, 0);
@@ -136,30 +124,27 @@ namespace particle_sim
 
         protected override void Draw(GameTime gameTime)
         {
-            GraphicsDevice.Clear(_cameraBackgroundColor); // A different background color
+            GraphicsDevice.Clear(_cameraBackgroundColor);
 
-            // Update the pheromone render layer (texture)
-            // This should happen before drawing it to the screen.
+            // Update the pheromone render layer before drawing it to the screen
             _environment.UpdatePheromoneRenderLayer(GraphicsDevice, _spriteBatch, _nestColorsById, _pixelTexture);
 
-            // Begin SpriteBatch with camera transform
+            // Begin the sprite batch 
             _spriteBatch.Begin(transformMatrix: _camera.GetViewMatrix());
 
+            // Draw environment background
             _spriteBatch.Draw(_pixelTexture, new Rectangle(0, 0, EnvironmentWidth, EnvironmentHeight), _simWorldBackgroundColor);
-            // 1. Draw Environment (Pheromone Layer)
+
+            // Draw pheromone layer
             _environment.Draw(_spriteBatch);
 
-            // 2. Draw Nests
+            // Draw nests
             foreach (Nest nest in _nests)
-            {
                 nest.Draw(_spriteBatch, _pixelTexture);
-            }
 
-            // 3. Draw Agents
+            // Draw agents
             foreach (Agent agent in _agents)
-            {
                 agent.Draw(_spriteBatch, _pixelTexture);
-            }
 
             _spriteBatch.End();
 
